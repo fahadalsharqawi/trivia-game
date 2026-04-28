@@ -2,6 +2,9 @@
 const { useState: qUS, useEffect: qUE, useRef: qUR } = React;
 
 function QuestionStage({ t, dir, lang, game, cellKey, onAward, onPass, tweaks }) {
+  // Defensive: parent can briefly leave the question flow with cellKey=null
+  // during the 400ms transition; render nothing until it remounts.
+  if (!cellKey) return null;
   const [catId, tier] = cellKey.split('-');
   const cat = CATEGORIES.find(c => c.id === catId);
   const tierData = TIERS[tier];

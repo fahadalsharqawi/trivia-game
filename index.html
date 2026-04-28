@@ -111,13 +111,12 @@
             activeTeam: newTeam === 'A' ? 'B' : 'A',
           };
           if (allDone) {
-            setTimeout(() => setFlow('final'), 400);
+            setTimeout(() => { setFlow('final'); setActiveCell(null); }, 400);
           } else {
-            setTimeout(() => setFlow('board'), 400);
+            setTimeout(() => { setFlow('board'); setActiveCell(null); }, 400);
           }
           return next;
         });
-        setActiveCell(null);
       };
 
       const onPass = (cellKey, kind) => {
@@ -132,11 +131,10 @@
             usedCells: used, usedLifelines: ull,
             activeTeam: newTeam === 'A' ? 'B' : 'A',
           };
-          if (allDone) setTimeout(() => setFlow('final'), 400);
-          else         setTimeout(() => setFlow('board'), 400);
+          if (allDone) setTimeout(() => { setFlow('final'); setActiveCell(null); }, 400);
+          else         setTimeout(() => { setFlow('board'); setActiveCell(null); }, 400);
           return next;
         });
-        setActiveCell(null);
       };
 
       const onRematch = () => {
