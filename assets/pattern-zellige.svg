@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" fill="none">
+  
+  <defs>
+    <pattern id="zell" x="0" y="0" width="80" height="80" patternUnits="userSpaceOnUse">
+      <g stroke="#E9A21B" stroke-width="0.8" opacity="0.45" fill="none">
+        <polygon points="40,8 48,32 72,32 52,48 60,72 40,56 20,72 28,48 8,32 32,32"></polygon>
+        <circle cx="40" cy="40" r="22"></circle>
+        <circle cx="40" cy="40" r="3" fill="#E9A21B" opacity="0.6"></circle>
+      </g>
+    </pattern>
+  </defs>
+  <rect width="200" height="200" fill="url(#zell)"></rect>
+</svg>

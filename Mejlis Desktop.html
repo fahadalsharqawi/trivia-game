@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Mejlis</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="app.css">
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel" src="tweaks-panel.jsx"></script>
+  <script type="text/babel" src="data.jsx"></script>
+  <script type="text/babel" src="shell.jsx"></script>
+  <script type="text/babel" src="library.jsx"></script>
+  <script type="text/babel" src="game-setup-board.jsx"></script>
+  <script type="text/babel" src="game-question.jsx"></script>
+  <script type="text/babel">
+    const { useState, useEffect, useRef } = React;
+
+    const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+      "language": "en",
+      "teamAName": "الديوانية",
+      "teamBName": "السالمية",
+      "teamAColor": "#1F8C76",
+      "teamBColor": "#D33F5C",
+      "timerSeconds": 60,
+      "lifelineCount": 3,
+      "patternIntensity": 60,
+      "fullscreenGame": true
+    }/*EDITMODE-END*/;
+
+    function App() {
+      const [tweaks, setTweak] = useTweaks(TWEAK_DEFAULTS);
+      const lang = tweaks.language;
+      const dir = lang === 'ar' ? 'rtl' : 'ltr';
+      const t = I18N[lang];
+
+      // Library navigation
+      const [section, setSection] = useState('home');
+      // Game flow: 'library' | 'setup' | 'board' | 'question' | 'final'
+      const [flow, setFlow] = useState('library');
+      const [setupPack, setSetupPack] = useState(null);
+      const [endConfirm, setEndConfirm] = useState(false);
+      const [activeCell, setActiveCell] = useState(null);
+
+      // Game state
+      const [game, setGame] = useState({
+        teamA: 0, teamB: 0,
+        teamAName: tweaks.teamAName, teamBName: tweaks.teamBName,
+        activeTeam: 'A',
+        usedCells: {},
+        usedLifelines: { A: [], B: [] },
+        streakA: 0, streakB: 0,
+        rounds: 3, timer: 30, lifelines: 3, packId: null,
+      });
+
+      // Sync title-screen names if Tweaks edits and game hasn't started
+      useEffect(() => {
+        if (flow === 'library' || flow === 'setup') {
+          setGame(g => ({ ...g, teamAName: tweaks.teamAName, teamBName: tweaks.teamBName }));
+        }
+      }, [tweaks.teamAName, tweaks.teamBName]);
+
+      const onStart = (packId) => {
+        const pack = PACKS.find(p => p.id === packId);
+        setSetupPack(pack);
+        setFlow('setup');
+      };
+
+      const onBegin = (cfg) => {
+        setGame({
+          teamA: 0, teamB: 0,
+          teamAName: cfg.teamA, teamBName: cfg.teamB,
+          activeTeam: 'A',
+          usedCells: {}, usedLifelines: { A: [], B: [] },
+          streakA: 0, streakB: 0,
+          rounds: cfg.rounds, timer: cfg.timer, lifelines: cfg.lifelines, packId: cfg.packId,
+        });
+        setFlow('board');
+      };
+
+      const onPickCell = (catId, tier) => {
+        setActiveCell(`${catId}-${tier}`);
+        setFlow('question');
+      };
+
+      const onAward = (cellKey, correct, doubled) => {
+        const tier = cellKey.split('-')[1];
+        const basePts = TIERS[tier].pts;
+        const pts = correct ? (doubled ? basePts * 2 : basePts) : 0;
+        setGame(g => {
+          const newTeam = g.activeTeam;
+          const teamAScore = newTeam === 'A' ? g.teamA + pts : g.teamA;
+          const teamBScore = newTeam === 'B' ? g.teamB + pts : g.teamB;
+          const streakA = newTeam === 'A' ? (correct ? g.streakA + 1 : 0) : g.streakA;
+          const streakB = newTeam === 'B' ? (correct ? g.streakB + 1 : 0) : g.streakB;
+          const used = { ...g.usedCells, [cellKey]: correct ? newTeam : 'X' };
+          // mark lifeline if doubled
+          const ull = { ...g.usedLifelines };
+          if (doubled) ull[newTeam] = [...new Set([...(ull[newTeam] || []), 'x2'])];
+
+          const allDone = Object.keys(used).length >= 18;
+          const next = {
+            ...g,
+            teamA: teamAScore, teamB: teamBScore,
+            streakA, streakB,
+            usedCells: used, usedLifelines: ull,
+            activeTeam: newTeam === 'A' ? 'B' : 'A',
+          };
+          if (allDone) {
+            setTimeout(() => setFlow('final'), 400);
+          } else {
+            setTimeout(() => setFlow('board'), 400);
+          }
+          return next;
+        });
+        setActiveCell(null);
+      };
+
+      const onPass = (cellKey, kind) => {
+        setGame(g => {
+          const newTeam = g.activeTeam;
+          const used = { ...g.usedCells, [cellKey]: 'X' };
+          const ull = { ...g.usedLifelines };
+          if (kind === 'skip') ull[newTeam] = [...new Set([...(ull[newTeam] || []), 'skip'])];
+          const allDone = Object.keys(used).length >= 18;
+          const next = {
+            ...g,
+            usedCells: used, usedLifelines: ull,
+            activeTeam: newTeam === 'A' ? 'B' : 'A',
+          };
+          if (allDone) setTimeout(() => setFlow('final'), 400);
+          else         setTimeout(() => setFlow('board'), 400);
+          return next;
+        });
+        setActiveCell(null);
+      };
+
+      const onRematch = () => {
+        setGame(g => ({
+          ...g,
+          teamA: 0, teamB: 0,
+          activeTeam: 'A',
+          usedCells: {}, usedLifelines: { A: [], B: [] },
+          streakA: 0, streakB: 0,
+        }));
+        setFlow('board');
+      };
+      const onNewGameAll = () => { setFlow('library'); setSection('home'); };
+
+      // Layout
+      const fullscreen = (flow === 'board' || flow === 'question' || flow === 'final') && tweaks.fullscreenGame;
+
+      const sidebar = !fullscreen && (
+        <Sidebar section={section} setSection={setSection} t={t} dir={dir} lang={lang}
+                 onCreate={() => alert(lang === 'ar' ? 'إنشاء حزمة (نموذج)' : 'Create pack (mock)')} />
+      );
+
+      let content;
+      if (flow === 'library') {
+        const right = section === 'home' ? (
+          <button className="btn-icon" aria-label="search">
+            <svg width="14" height="14" viewBox="0 0 256 256" fill="currentColor"><path d="m229.66 218.34-50.07-50.06a88.11 88.11 0 1 0-11.31 11.31l50.06 50.07a8 8 0 0 0 11.32-11.32ZM40 112a72 72 0 1 1 72 72 72.08 72.08 0 0 1-72-72Z"/></svg>
+          </button>
+        ) : null;
+        const titles = {
+          home:     { title: t.home,     sub: t.welcomeSub },
+          packs:    { title: t.packs,    sub: `${PACKS.length} ${lang === 'ar' ? 'حزمة في المكتبة' : 'in your library'}` },
+          history:  { title: t.history,  sub: lang === 'ar' ? 'الجلسات السابقة' : 'Past sessions' },
+          settings: { title: t.settings, sub: lang === 'ar' ? 'تفضيلات المضيّف' : 'Host preferences' },
+        };
+        content = (
+          <>
+            <Toolbar title={titles[section].title} subtitle={titles[section].sub} lang={lang} setLang={(v) => setTweak('language', v)} dir={dir} right={right} />
+            {section === 'home'     && <HomeScreen     t={t} dir={dir} lang={lang} onStart={onStart} setSection={setSection} tweaks={tweaks} />}
+            {section === 'packs'    && <PacksScreen    t={t} dir={dir} lang={lang} onStart={onStart} />}
+            {section === 'history'  && <HistoryScreen  t={t} dir={dir} lang={lang} />}
+            {section === 'settings' && <SettingsScreen t={t} dir={dir} lang={lang} />}
+            {flow === 'setup' && setupPack && (
+              <SetupModal t={t} dir={dir} lang={lang} pack={setupPack}
+                          onCancel={() => { setFlow('library'); setSetupPack(null); }}
+                          onBegin={onBegin} tweaks={tweaks} />
+            )}
+          </>
+        );
+      } else if (flow === 'setup') {
+        // Show library underneath, modal on top
+        content = (
+          <>
+            <Toolbar title={t.home} subtitle={t.welcomeSub} lang={lang} setLang={(v) => setTweak('language', v)} dir={dir} />
+            <HomeScreen t={t} dir={dir} lang={lang} onStart={onStart} setSection={setSection} tweaks={tweaks} />
+            <SetupModal t={t} dir={dir} lang={lang} pack={setupPack}
+                        onCancel={() => { setFlow('library'); setSetupPack(null); }}
+                        onBegin={onBegin} tweaks={tweaks} />
+          </>
+        );
+      } else if (flow === 'board') {
+        content = (
+          <>
+            <BoardScreen t={t} dir={dir} lang={lang} game={game}
+                         onPickCell={onPickCell} onEnd={() => setEndConfirm(true)}
+                         tweaks={tweaks} />
+            {endConfirm && <EndConfirm t={t} dir={dir} lang={lang}
+                                       onCancel={() => setEndConfirm(false)}
+                                       onConfirm={() => { setEndConfirm(false); setFlow('final'); }} />}
+          </>
+        );
+      } else if (flow === 'question') {
+        content = (
+          <QuestionStage t={t} dir={dir} lang={lang} game={game} cellKey={activeCell}
+                         onAward={onAward} onPass={onPass} tweaks={tweaks} />
+        );
+      } else if (flow === 'final') {
+        content = (
+          <FinalScreen t={t} dir={dir} lang={lang} game={game}
+                       onRematch={onRematch} onNewGame={onNewGameAll} tweaks={tweaks} />
+        );
+      }
+
+      return (
+        <>
+          <div className="app-stage">
+            <MejlisWindow sidebar={sidebar} fullscreen={fullscreen}>
+              {content}
+            </MejlisWindow>
+          </div>
+          <div data-screen-label={`${section}-${flow}`} style={{ display: 'none' }} />
+
+          <TweaksPanel title="Tweaks">
+            <TweakSection label="Language" />
+            <TweakRadio label="UI"  value={tweaks.language} options={[{value:'ar',label:'العربية'},{value:'en',label:'English'}]} onChange={v => setTweak('language', v)} />
+
+            <TweakSection label="Teams" />
+            <TweakText  label="Team A name" value={tweaks.teamAName} onChange={v => setTweak('teamAName', v)} />
+            <TweakColor label="Team A color" value={tweaks.teamAColor} onChange={v => setTweak('teamAColor', v)} />
+            <TweakText  label="Team B name" value={tweaks.teamBName} onChange={v => setTweak('teamBName', v)} />
+            <TweakColor label="Team B color" value={tweaks.teamBColor} onChange={v => setTweak('teamBColor', v)} />
+
+            <TweakSection label="Round" />
+            <TweakSlider label="Timer"     value={tweaks.timerSeconds}  min={15} max={120} step={5} unit="s" onChange={v => setTweak('timerSeconds', v)} />
+            <TweakSlider label="Lifelines" value={tweaks.lifelineCount} min={0} max={5} onChange={v => setTweak('lifelineCount', v)} />
+
+            <TweakSection label="Look" />
+            <TweakSlider label="Pattern intensity" value={tweaks.patternIntensity} min={0} max={100} unit="%" onChange={v => setTweak('patternIntensity', v)} />
+            <TweakToggle label="Fullscreen game"   value={tweaks.fullscreenGame} onChange={v => setTweak('fullscreenGame', v)} />
+
+            <TweakSection label="Jump to" />
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
+              <TweakButton secondary label="Library" onClick={() => { setFlow('library'); setSection('home'); }} />
+              <TweakButton secondary label="Board"   onClick={() => setFlow('board')} />
+              <TweakButton secondary label="Question" onClick={() => { setActiveCell('history-hard'); setFlow('question'); }} />
+              <TweakButton secondary label="Final"   onClick={() => { setGame(g => ({ ...g, teamA: 2400, teamB: 1800 })); setFlow('final'); }} />
+            </div>
+          </TweaksPanel>
+        </>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>

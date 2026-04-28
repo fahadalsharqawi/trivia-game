@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 120" fill="none">
+  <rect x="0" y="14" width="92" height="92" rx="22" fill="#0B0F1A"></rect>
+  <path d="M24 84 V60 a22 22 0 0 1 44 0 V84" stroke="#E9A21B" stroke-width="6" stroke-linecap="round"></path>
+  <circle cx="46" cy="62" r="5.5" fill="#E9A21B"></circle>
+  <rect x="24" y="82" width="44" height="6" rx="3" fill="#E9A21B"></rect>
+  <text x="112" y="62" font-family="Tajawal, system-ui, sans-serif" font-size="34" font-weight="900" fill="#FBF6EC" letter-spacing="-1">Mejlis</text>
+  <text x="112" y="92" font-family="Tajawal, system-ui, sans-serif" font-size="22" font-weight="700" fill="#E9A21B" direction="rtl">مجلس</text>
+</svg>
