@@ -2,13 +2,45 @@
 const { useState: gUS, useEffect: gUE, useRef: gUR } = React;
 
 // === SETUP MODAL — over the library ===
+// Persists the user's last setup (categories, difficulty, rounds, timer,
+// lifelines) to localStorage so the next game pre-fills with their picks.
+const SETUP_STORAGE_KEY = 'mejlis-setup-v1';
+function loadSetup() {
+  try { return JSON.parse(localStorage.getItem(SETUP_STORAGE_KEY)) || null; }
+  catch { return null; }
+}
+function saveSetup(s) {
+  try { localStorage.setItem(SETUP_STORAGE_KEY, JSON.stringify(s)); } catch {}
+}
+
 function SetupModal({ t, dir, lang, pack, onCancel, onBegin, tweaks }) {
+  const saved = loadSetup() || {};
   const [teamA, setTeamA] = gUS(tweaks.teamAName);
   const [teamB, setTeamB] = gUS(tweaks.teamBName);
-  const [rounds, setRounds] = gUS(3);
-  const [timer, setTimer] = gUS(tweaks.timerSeconds);
-  const [lifelines, setLifelines] = gUS(tweaks.lifelineCount);
+  const [rounds, setRounds] = gUS(saved.rounds ?? 3);
+  const [timer, setTimer] = gUS(saved.timer ?? tweaks.timerSeconds);
+  const [lifelines, setLifelines] = gUS(saved.lifelines ?? tweaks.lifelineCount);
+  // Category picker — exactly 6 of the 9 available.
+  const [pickedCats, setPickedCats] = gUS(
+    Array.isArray(saved.cats) && saved.cats.length === 6 ? saved.cats : DEFAULT_BOARD_CATS
+  );
+  // Difficulty mode — 'mixed' uses tier-based difficulty (current behavior);
+  // others force a single difficulty across all 18 cells (point values still
+  // scale with the row, so harder rows are still worth more).
+  const [difficultyMode, setDifficultyMode] = gUS(saved.difficultyMode || 'mixed');
   if (!pack) return null;
+
+  const toggleCat = (id) => setPickedCats(prev => {
+    if (prev.includes(id)) return prev.length > 1 ? prev.filter(c => c !== id) : prev;
+    // FIFO when over the cap of 6, so the click feels like "swap in the new one"
+    return prev.length >= 6 ? [...prev.slice(1), id] : [...prev, id];
+  });
+
+  const begin = () => {
+    if (pickedCats.length !== 6) return;
+    saveSetup({ rounds, timer, lifelines, cats: pickedCats, difficultyMode });
+    onBegin({ teamA, teamB, rounds, timer, lifelines, packId: pack.id, cats: pickedCats, difficultyMode });
+  };
 
   return (
     <div style={{
@@ -18,19 +50,19 @@ function SetupModal({ t, dir, lang, pack, onCancel, onBegin, tweaks }) {
       display: 'flex', alignItems: 'center', justifyContent: 'center',
       padding: 32,
     }} className="fade-in" onClick={onCancel}>
-      <div dir={dir} onClick={e => e.stopPropagation()} style={{
-        width: 640, maxWidth: '100%',
+      <div dir={dir} onClick={e => e.stopPropagation()} className="sheet-in" style={{
+        width: 720, maxWidth: '100%', maxHeight: 'calc(100vh - 64px)', overflowY: 'auto',
         background: 'var(--bg-surface)',
         border: '1px solid var(--border-2)',
         borderRadius: 24,
         boxShadow: 'var(--shadow-xl)',
         padding: 36,
-        position: 'relative', overflow: 'hidden',
+        position: 'relative',
       }}>
         <div style={{
           position: 'absolute', top: -40, [dir === 'rtl' ? 'left' : 'right']: -40,
           width: 200, height: 200, borderRadius: '50%',
-          background: pack.color, opacity: 0.15, filter: 'blur(40px)',
+          background: pack.color, opacity: 0.15, filter: 'blur(40px)', pointerEvents: 'none',
         }} />
         <div style={{ position: 'relative' }}>
           <div className="eyebrow" style={{ color: tweaks.teamAColor }}>{t.startGame}</div>
@@ -47,17 +79,72 @@ function SetupModal({ t, dir, lang, pack, onCancel, onBegin, tweaks }) {
             <TeamInput color={tweaks.teamBColor} label={t.teamB} value={teamB} onChange={setTeamB} dir={dir} />
           </div>
 
+          {/* Categories — pick 6 */}
+          <div style={{ marginTop: 24 }}>
+            <div className="eyebrow" style={{ marginBottom: 10, display: 'flex', justifyContent: 'space-between' }}>
+              <span>{lang === 'ar' ? 'الفئات' : 'Categories'}</span>
+              <span style={{ fontFamily: 'var(--font-mono)', color: pickedCats.length === 6 ? 'var(--accent)' : 'var(--fg-3)' }}>
+                {pickedCats.length}/6
+              </span>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+              {CATEGORIES.map(c => {
+                const on = pickedCats.includes(c.id);
+                return (
+                  <button key={c.id} type="button" onClick={() => toggleCat(c.id)} style={{
+                    display: 'flex', alignItems: 'center', gap: 10,
+                    padding: '10px 12px',
+                    background: on ? 'rgba(233,162,27,0.14)' : 'var(--bg-canvas)',
+                    border: `1px solid ${on ? 'var(--accent)' : 'var(--border-1)'}`,
+                    borderRadius: 12,
+                    color: on ? 'var(--fg-1)' : 'var(--fg-2)',
+                    cursor: 'pointer', textAlign: dir === 'rtl' ? 'right' : 'left',
+                    transition: 'all 140ms var(--ease-out)',
+                    fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 13,
+                  }}>
+                    <span style={{ width: 16, height: 16, color: on ? 'var(--accent)' : 'var(--fg-3)', flexShrink: 0 }}
+                          dangerouslySetInnerHTML={{ __html: c.icon }} />
+                    <span style={{ flex: 1 }}>{lang === 'ar' ? c.ar : c.en}</span>
+                    {on && <span style={{ color: 'var(--accent)', fontSize: 12 }}>✓</span>}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
           {/* Settings grid */}
-          <div style={{ marginTop: 24, display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
+          <div style={{ marginTop: 20, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div>
+              <div className="eyebrow" style={{ marginBottom: 8 }}>{lang === 'ar' ? 'الصعوبة' : 'Difficulty'}</div>
+              <div style={{ display: 'flex', padding: 3, background: 'var(--bg-canvas)', borderRadius: 10, border: '1px solid var(--border-1)' }}>
+                {[
+                  { v: 'mixed',  l: lang === 'ar' ? 'متنوع' : 'Mixed' },
+                  { v: 'easy',   l: lang === 'ar' ? 'سهل'   : 'Easy' },
+                  { v: 'medium', l: lang === 'ar' ? 'وسط'   : 'Medium' },
+                  { v: 'hard',   l: lang === 'ar' ? 'صعب'   : 'Hard' },
+                ].map(o => (
+                  <button key={o.v} onClick={() => setDifficultyMode(o.v)} style={{
+                    flex: 1, padding: '8px',
+                    background: difficultyMode === o.v ? 'var(--accent)' : 'transparent',
+                    color: difficultyMode === o.v ? 'var(--midnight-950)' : 'var(--fg-2)',
+                    border: 'none', borderRadius: 8,
+                    fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 12, cursor: 'pointer',
+                    transition: 'background 140ms',
+                  }}>{o.l}</button>
+                ))}
+              </div>
+            </div>
             <SegmentControl label={t.rounds} options={[1,3,5]} value={rounds} onChange={setRounds} dir={dir} />
+          </div>
+          <div style={{ marginTop: 12, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             <StepperControl label={t.timer} value={timer} onChange={setTimer} unit={t.seconds} min={15} max={120} step={5} dir={dir} />
             <StepperControl label={t.lifelines} value={lifelines} onChange={setLifelines} unit="" min={0} max={5} step={1} dir={dir} />
           </div>
 
           {/* Actions */}
-          <div style={{ marginTop: 32, display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+          <div style={{ marginTop: 28, display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
             <button className="btn-ghost" onClick={onCancel}>{t.cancel}</button>
-            <button className="btn-primary" onClick={() => onBegin({ teamA, teamB, rounds, timer, lifelines, packId: pack.id })}>
+            <button className="btn-primary" onClick={begin} disabled={pickedCats.length !== 6}>
               {t.begin}
             </button>
           </div>
@@ -121,7 +208,9 @@ function StepperControl({ label, value, onChange, unit, min, max, step, dir }) {
 
 // === BOARD — Jeopardy-style 6×3 grid, full-bleed ===
 function BoardScreen({ t, dir, lang, game, onPickCell, onEnd, tweaks }) {
-  const cats = DEFAULT_BOARD_CATS.map(id => CATEGORIES.find(c => c.id === id));
+  // Use the user-picked categories from setup; fall back to the default 6.
+  const catIds = (Array.isArray(game.cats) && game.cats.length === 6) ? game.cats : DEFAULT_BOARD_CATS;
+  const cats = catIds.map(id => CATEGORIES.find(c => c.id === id)).filter(Boolean);
   const tiers = ['easy', 'medium', 'hard'];
   const usedCells = game.usedCells || {};
   const total = 6 * 3;
@@ -270,7 +359,9 @@ function ScorePill({ team, active, name, score, streak, color, lang, t }) {
       </div>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
         <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 14, color: 'var(--fg-1)', maxWidth: 110, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</span>
-        <span className="tabular" style={{ marginInlineStart: 'auto', fontFamily: 'var(--font-display)', fontWeight: 900, fontSize: 22, color, letterSpacing: '-0.02em' }}>
+        {/* key={score} remounts the span on every change, restarting the
+            scoreBump CSS animation defined in app.css. */}
+        <span key={score} className="tabular score-bump" style={{ marginInlineStart: 'auto', fontFamily: 'var(--font-display)', fontWeight: 900, fontSize: 22, color, letterSpacing: '-0.02em', display: 'inline-block' }}>
           {formatted}
         </span>
       </div>

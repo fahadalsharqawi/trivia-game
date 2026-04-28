@@ -22,6 +22,7 @@
 
     const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
       "language": "en",
+      "theme": "dark",
       "teamAName": "الديوانية",
       "teamBName": "السالمية",
       "teamAColor": "#1F8C76",
@@ -32,11 +33,33 @@
       "fullscreenGame": true
     }/*EDITMODE-END*/;
 
+    // === Shareable state ===========================================
+    // Encode the final scoreboard into the URL hash. Base64-encoded JSON
+    // keeps it short and URL-safe; readable enough that a curious user
+    // can decode it but not so structured that it invites tampering.
+    function encodeShare(state) {
+      try { return btoa(unescape(encodeURIComponent(JSON.stringify(state)))); }
+      catch { return ''; }
+    }
+    function decodeShare(s) {
+      try { return JSON.parse(decodeURIComponent(escape(atob(s)))); }
+      catch { return null; }
+    }
+    function readShareFromUrl() {
+      const m = location.hash.match(/[#&]share=([^&]+)/);
+      return m ? decodeShare(m[1]) : null;
+    }
+
     function App() {
       const [tweaks, setTweak] = useTweaks(TWEAK_DEFAULTS);
       const lang = tweaks.language;
       const dir = lang === 'ar' ? 'rtl' : 'ltr';
       const t = I18N[lang];
+
+      // Apply theme to <body> so CSS [data-theme="light"] selectors work.
+      useEffect(() => {
+        document.body.setAttribute('data-theme', tweaks.theme || 'dark');
+      }, [tweaks.theme]);
 
       // Library navigation
       const [section, setSection] = useState('home');
@@ -45,8 +68,10 @@
       const [setupPack, setSetupPack] = useState(null);
       const [endConfirm, setEndConfirm] = useState(false);
       const [activeCell, setActiveCell] = useState(null);
+      const [toast, setToast] = useState(null);  // {msg} | null
 
-      // Game state
+      // Game state — adds session stats (correct/incorrect/passed) and the
+      // user-chosen board categories + difficulty mode from setup.
       const [game, setGame] = useState({
         teamA: 0, teamB: 0,
         teamAName: tweaks.teamAName, teamBName: tweaks.teamBName,
@@ -54,8 +79,28 @@
         usedCells: {},
         usedLifelines: { A: [], B: [] },
         streakA: 0, streakB: 0,
+        stats: { correct: 0, incorrect: 0, passed: 0 },
+        cats: DEFAULT_BOARD_CATS,
+        difficultyMode: 'mixed',
         rounds: 3, timer: 30, lifelines: 3, packId: null,
       });
+
+      // === Restore shared state on first load =====================
+      // If we landed via a #share=… URL, pre-populate the final screen
+      // and skip the library entirely.
+      useEffect(() => {
+        const shared = readShareFromUrl();
+        if (!shared) return;
+        setGame(g => ({
+          ...g,
+          teamA: shared.a ?? 0, teamB: shared.b ?? 0,
+          teamAName: shared.an || g.teamAName,
+          teamBName: shared.bn || g.teamBName,
+          stats: shared.stats || g.stats,
+        }));
+        setFlow('final');
+        setToast({ msg: lang === 'ar' ? 'نتيجة مشاركة' : 'Shared result' });
+      }, []);  // eslint-disable-line
 
       // Sync title-screen names if Tweaks edits and game hasn't started
       useEffect(() => {
@@ -77,6 +122,9 @@
           activeTeam: 'A',
           usedCells: {}, usedLifelines: { A: [], B: [] },
           streakA: 0, streakB: 0,
+          stats: { correct: 0, incorrect: 0, passed: 0 },
+          cats: cfg.cats || DEFAULT_BOARD_CATS,
+          difficultyMode: cfg.difficultyMode || 'mixed',
           rounds: cfg.rounds, timer: cfg.timer, lifelines: cfg.lifelines, packId: cfg.packId,
         });
         setFlow('board');
@@ -101,6 +149,12 @@
           // mark lifeline if doubled
           const ull = { ...g.usedLifelines };
           if (doubled) ull[newTeam] = [...new Set([...(ull[newTeam] || []), 'x2'])];
+          // Session-wide tally — independent of which team got the point.
+          const stats = {
+            ...g.stats,
+            correct:   g.stats.correct   + (correct ? 1 : 0),
+            incorrect: g.stats.incorrect + (correct ? 0 : 1),
+          };
 
           const allDone = Object.keys(used).length >= 18;
           const next = {
@@ -108,6 +162,7 @@
             teamA: teamAScore, teamB: teamBScore,
             streakA, streakB,
             usedCells: used, usedLifelines: ull,
+            stats,
             activeTeam: newTeam === 'A' ? 'B' : 'A',
           };
           if (allDone) {
@@ -125,10 +180,11 @@
           const used = { ...g.usedCells, [cellKey]: 'X' };
           const ull = { ...g.usedLifelines };
           if (kind === 'skip') ull[newTeam] = [...new Set([...(ull[newTeam] || []), 'skip'])];
+          const stats = { ...g.stats, passed: g.stats.passed + 1 };
           const allDone = Object.keys(used).length >= 18;
           const next = {
             ...g,
-            usedCells: used, usedLifelines: ull,
+            usedCells: used, usedLifelines: ull, stats,
             activeTeam: newTeam === 'A' ? 'B' : 'A',
           };
           if (allDone) setTimeout(() => { setFlow('final'); setActiveCell(null); }, 400);
@@ -144,10 +200,33 @@
           activeTeam: 'A',
           usedCells: {}, usedLifelines: { A: [], B: [] },
           streakA: 0, streakB: 0,
+          stats: { correct: 0, incorrect: 0, passed: 0 },
         }));
         setFlow('board');
       };
-      const onNewGameAll = () => { setFlow('library'); setSection('home'); };
+      const onNewGameAll = () => {
+        // Clear any lingering ?share= so a fresh round doesn't relaunch the
+        // shared-result screen on next load.
+        if (location.hash.includes('share=')) history.replaceState(null, '', location.pathname);
+        setFlow('library'); setSection('home');
+      };
+
+      // Build a share URL for the current final state and copy to clipboard.
+      const onShare = async () => {
+        const payload = encodeShare({
+          a: game.teamA, b: game.teamB,
+          an: game.teamAName, bn: game.teamBName,
+          stats: game.stats,
+        });
+        const url = `${location.origin}${location.pathname}#share=${payload}`;
+        try {
+          await navigator.clipboard.writeText(url);
+          setToast({ msg: lang === 'ar' ? 'نُسخ الرابط' : 'Link copied' });
+        } catch {
+          // Clipboard can fail without HTTPS or focus — fall back to a prompt.
+          window.prompt(lang === 'ar' ? 'انسخ الرابط:' : 'Copy this link:', url);
+        }
+      };
 
       // Layout
       const fullscreen = (flow === 'board' || flow === 'question' || flow === 'final') && tweaks.fullscreenGame;
@@ -214,7 +293,8 @@
       } else if (flow === 'final') {
         content = (
           <FinalScreen t={t} dir={dir} lang={lang} game={game}
-                       onRematch={onRematch} onNewGame={onNewGameAll} tweaks={tweaks} />
+                       onRematch={onRematch} onNewGame={onNewGameAll}
+                       onShare={onShare} tweaks={tweaks} />
         );
       }
 
@@ -226,6 +306,12 @@
             </MejlisWindow>
           </div>
           <div data-screen-label={`${section}-${flow}`} style={{ display: 'none' }} />
+          {toast && (
+            <div key={toast.msg + Date.now()} className="toast"
+                 onAnimationEnd={() => setToast(null)}>
+              {toast.msg}
+            </div>
+          )}
 
           <TweaksPanel title="Tweaks">
             <TweakSection label="Language" />
@@ -242,6 +328,7 @@
             <TweakSlider label="Lifelines" value={tweaks.lifelineCount} min={0} max={5} onChange={v => setTweak('lifelineCount', v)} />
 
             <TweakSection label="Look" />
+            <TweakRadio  label="Theme" value={tweaks.theme} options={[{value:'dark',label:'Dark'},{value:'light',label:'Light'}]} onChange={v => setTweak('theme', v)} />
             <TweakSlider label="Pattern intensity" value={tweaks.patternIntensity} min={0} max={100} unit="%" onChange={v => setTweak('patternIntensity', v)} />
             <TweakToggle label="Fullscreen game"   value={tweaks.fullscreenGame} onChange={v => setTweak('fullscreenGame', v)} />
 

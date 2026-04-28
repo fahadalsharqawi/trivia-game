@@ -17,11 +17,11 @@ function QuestionStage({ t, dir, lang, game, cellKey, onAward, onPass, tweaks })
   qUE(() => {
     let cancelled = false;
     setApiQ(null); setApiError(null); setApiLoading(true);
-    fetchOpenTdbQuestion(catId, tier)
+    fetchOpenTdbQuestion(catId, tier, { difficultyMode: game.difficultyMode })
       .then(q => { if (!cancelled) { setApiQ(q); setApiLoading(false); } })
       .catch(err => { if (!cancelled) { setApiError(err.message || 'fetch failed'); setApiLoading(false); } });
     return () => { cancelled = true; };
-  }, [catId, tier]);
+  }, [catId, tier, game.difficultyMode]);
 
   const [revealed, setRevealed] = qUS(false);
   const [time, setTime] = qUS(tweaks.timerSeconds);
@@ -325,12 +325,15 @@ function Lifeline({ kind, label, ar, used, active, onClick, lang }) {
 }
 
 // === FINAL SCOREBOARD — paper-feel, receipt aesthetic ===
-function FinalScreen({ t, dir, lang, game, onRematch, onNewGame, tweaks }) {
+function FinalScreen({ t, dir, lang, game, onRematch, onNewGame, onShare, tweaks }) {
   const tied = game.teamA === game.teamB;
   const winnerIsA = game.teamA > game.teamB;
   const winnerName = tied ? null : (winnerIsA ? game.teamAName : game.teamBName);
   const winnerColor = tied ? 'var(--fg-on-paper)' : (winnerIsA ? tweaks.teamAColor : tweaks.teamBColor);
   const formatNum = (n) => lang === 'ar' ? n.toLocaleString().replace(/\d/g, d => '٠١٢٣٤٥٦٧٨٩'[+d]) : n.toLocaleString();
+  const stats = game.stats || { correct: 0, incorrect: 0, passed: 0 };
+  const answered = stats.correct + stats.incorrect;
+  const accuracy = answered > 0 ? Math.round((stats.correct / answered) * 100) : 0;
 
   return (
     <div dir={dir} style={{
@@ -378,9 +381,17 @@ function FinalScreen({ t, dir, lang, game, onRematch, onNewGame, tweaks }) {
             <ScoreLine name={game.teamBName} score={game.teamB} color={tweaks.teamBColor} winner={!winnerIsA && !tied} t={t} team="B" lang={lang} format={formatNum} />
 
             <div style={{ marginTop: 20, paddingTop: 16, borderTop: '1px dashed rgba(17,22,38,0.2)', display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16, fontSize: 11 }}>
-              <Stat label={lang === 'ar' ? 'الأسئلة' : 'Questions'} value={formatNum(18)} />
+              <Stat label={lang === 'ar' ? 'الأسئلة' : 'Questions'} value={formatNum(answered + stats.passed || 18)} />
               <Stat label={lang === 'ar' ? 'الفارق' : 'Margin'} value={formatNum(Math.abs(game.teamA - game.teamB))} />
               <Stat label={lang === 'ar' ? 'الحزمة' : 'Pack'} value={lang === 'ar' ? PACKS[0].ar : PACKS[0].en} />
+            </div>
+
+            {/* Session stats — correct / incorrect / passed across the round */}
+            <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px dashed rgba(17,22,38,0.2)', display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 16, fontSize: 11 }}>
+              <Stat label={lang === 'ar' ? 'صحيح'  : 'Correct'}   value={formatNum(stats.correct)}   color="var(--olive-700)" />
+              <Stat label={lang === 'ar' ? 'خطأ'   : 'Incorrect'} value={formatNum(stats.incorrect)} color="var(--rose-700)" />
+              <Stat label={lang === 'ar' ? 'تخطي'  : 'Passed'}    value={formatNum(stats.passed)} />
+              <Stat label={lang === 'ar' ? 'الدقة' : 'Accuracy'}  value={`${formatNum(accuracy)}%`} color={accuracy >= 60 ? 'var(--olive-700)' : 'var(--fg-on-paper)'} />
             </div>
           </div>
 
@@ -394,13 +405,25 @@ function FinalScreen({ t, dir, lang, game, onRematch, onNewGame, tweaks }) {
         </div>
 
         {/* Actions */}
-        <div style={{ display: 'flex', gap: 12, marginTop: 24 }}>
+        <div style={{ display: 'flex', gap: 12, marginTop: 24, flexWrap: 'wrap' }}>
           <button className="btn-primary" onClick={onRematch}>{t.rematch}</button>
           <button onClick={onNewGame} style={{
             padding: '14px 26px', background: 'transparent', color: 'var(--fg-on-paper)',
             border: '1px solid rgba(17,22,38,0.2)', borderRadius: 999,
             fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 14, cursor: 'pointer',
           }}>{t.newGame}</button>
+          {onShare && (
+            <button onClick={onShare} style={{
+              padding: '14px 22px', background: 'var(--midnight-900)', color: 'var(--cream-50)',
+              border: 'none', borderRadius: 999,
+              fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 14, cursor: 'pointer',
+              display: 'inline-flex', alignItems: 'center', gap: 8,
+              boxShadow: '0 4px 14px rgba(0,0,0,0.18)',
+            }}>
+              <svg width="14" height="14" viewBox="0 0 256 256" fill="currentColor"><path d="M176 156a35.94 35.94 0 0 0-26.34 11.46l-58.27-32.65a36 36 0 0 0 0-21.62l58.27-32.65a35.95 35.95 0 1 0-7.81-13.97l-58.27 32.65a36 36 0 1 0 0 49.56l58.27 32.65A36 36 0 1 0 176 156Z"/></svg>
+              {lang === 'ar' ? 'شارك' : 'Share'}
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -426,11 +449,11 @@ function ScoreLine({ name, score, color, winner, t, team, lang, format }) {
   );
 }
 
-function Stat({ label, value }) {
+function Stat({ label, value, color }) {
   return (
     <div>
       <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, fontWeight: 600, color: 'var(--fg-on-paper-3)', letterSpacing: '0.12em', textTransform: 'uppercase' }}>{label}</div>
-      <div style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 14, marginTop: 4, color: 'var(--fg-on-paper)' }}>{value}</div>
+      <div className="tabular" style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 14, marginTop: 4, color: color || 'var(--fg-on-paper)' }}>{value}</div>
     </div>
   );
 }

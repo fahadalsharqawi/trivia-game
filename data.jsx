@@ -175,14 +175,18 @@ function __shuffle(arr) {
 
 // OpenTDB returns content URL-encoded (encode=url3986). decodeURIComponent
 // handles percent-encoded UTF-8 cleanly — no need for an HTML-entity decoder.
-async function fetchOpenTdbQuestion(catId, tier) {
+async function fetchOpenTdbQuestion(catId, tier, opts = {}) {
   const cat = CATEGORIES.find(c => c.id === catId);
   if (!cat?.tdbId) throw new Error('No OpenTDB mapping for ' + catId);
+  // difficultyMode override: 'mixed' (default) uses the tier; 'easy'|'medium'|
+  // 'hard' forces every cell to that difficulty.
+  const mode = opts.difficultyMode;
+  const difficulty = (mode && mode !== 'mixed') ? mode : tier;
   const token = await getOpenTdbToken();
   const params = new URLSearchParams({
     amount: '1',
     category: String(cat.tdbId),
-    difficulty: tier,
+    difficulty,
     encode: 'url3986',
   });
   if (token) params.set('token', token);

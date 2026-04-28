@@ -118,6 +118,28 @@ input { font-family: inherit; }
 }
 .wipe-reveal { animation: wipeReveal 540ms var(--ease-out); }
 
+/* Subtle slide-up for newly-mounted modal content */
+@keyframes sheetIn { from { opacity: 0; transform: translateY(16px) scale(0.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
+.sheet-in { animation: sheetIn 320ms var(--ease-out); }
+
+/* Toast — slides up from the bottom, fades after a beat */
+@keyframes toastIn {
+  0%   { opacity: 0; transform: translate(-50%, 24px); }
+  10%  { opacity: 1; transform: translate(-50%, 0); }
+  85%  { opacity: 1; transform: translate(-50%, 0); }
+  100% { opacity: 0; transform: translate(-50%, -8px); }
+}
+.toast {
+  position: fixed; left: 50%; bottom: 32px; z-index: 9999;
+  padding: 10px 18px; border-radius: 999px;
+  background: var(--bg-raised); color: var(--fg-1);
+  border: 1px solid var(--border-2);
+  font-family: var(--font-display); font-weight: 600; font-size: 13px;
+  box-shadow: var(--shadow-lg);
+  animation: toastIn 2400ms var(--ease-out) forwards;
+  pointer-events: none;
+}
+
 /* RTL adjustments */
 [dir="rtl"] {
   letter-spacing: 0;

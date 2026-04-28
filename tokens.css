@@ -306,3 +306,23 @@ code, pre, .mono {
 [dir="rtl"] {
   letter-spacing: 0;  /* don't track Arabic */
 }
+
+/* =============================================================
+   LIGHT THEME — flips the semantic surface/foreground tokens.
+   Accent colors (saffron/teal/rose) stay the same so brand
+   identity is preserved across modes.
+   ============================================================= */
+body[data-theme="light"] {
+  --bg-canvas:    var(--cream-50);
+  --bg-surface:   #FFFFFF;
+  --bg-raised:    var(--cream-100);
+  --bg-overlay:   rgba(11, 15, 26, 0.40);
+
+  --fg-1:         var(--midnight-900);
+  --fg-2:         var(--midnight-700);
+  --fg-3:         #5C6478;
+
+  --border-1:     rgba(17, 22, 38, 0.10);
+  --border-2:     rgba(17, 22, 38, 0.18);
+  --border-strong:rgba(17, 22, 38, 0.32);
+}
