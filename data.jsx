@@ -133,17 +133,83 @@ const ICON = {
   poetry: '<svg viewBox="0 0 256 256" fill="currentColor"><path d="M208 24h-72a40 40 0 0 0-32 16 40 40 0 0 0-32-16H40a16 16 0 0 0-16 16v144a16 16 0 0 0 16 16h64a24 24 0 0 1 24 24 8 8 0 0 0 16 0 24 24 0 0 1 24-24h64a16 16 0 0 0 16-16V40a16 16 0 0 0-16-16Z"/></svg>',
 };
 
+// tdbId maps each category to its Open Trivia DB category id (opentdb.com).
+// "food" has no OpenTDB equivalent and falls back to General Knowledge (9).
 const CATEGORIES = [
-  { id: 'history',  en: 'History',   ar: 'التاريخ',   icon: ICON.history,  sub: { en: 'Kuwait, Gulf, world',   ar: 'الكويت، الخليج، العالم' } },
-  { id: 'cinema',   en: 'Cinema',    ar: 'السينما',   icon: ICON.cinema,   sub: { en: 'Films & series',        ar: 'أفلام ومسلسلات' } },
-  { id: 'sports',   en: 'Sports',    ar: 'الرياضة',   icon: ICON.sports,   sub: { en: 'Local & global',        ar: 'محلية وعالمية' } },
-  { id: 'music',    en: 'Music',     ar: 'الموسيقى',  icon: ICON.music,    sub: { en: 'Khaleeji & pop',        ar: 'خليجية وعالمية' } },
-  { id: 'science',  en: 'Science',   ar: 'العلوم',    icon: ICON.science,  sub: { en: 'Body & world',          ar: 'الجسد والعالم' } },
-  { id: 'food',     en: 'Food',      ar: 'الطعام',    icon: ICON.food,     sub: { en: 'Recipes & origins',     ar: 'وصفات وأصول' } },
-  { id: 'language', en: 'Language',  ar: 'اللغة',     icon: ICON.language, sub: { en: 'Words, sayings',        ar: 'كلمات وأمثال' } },
-  { id: 'geo',      en: 'Geography', ar: 'الجغرافيا', icon: ICON.geo,      sub: { en: 'Places & flags',        ar: 'أماكن وأعلام' } },
-  { id: 'poetry',   en: 'Poetry',    ar: 'الشعر',     icon: ICON.poetry,   sub: { en: 'Verses & poets',        ar: 'أبيات وشعراء' } },
+  { id: 'history',  tdbId: 23, en: 'History',   ar: 'التاريخ',   icon: ICON.history,  sub: { en: 'Kuwait, Gulf, world',   ar: 'الكويت، الخليج، العالم' } },
+  { id: 'cinema',   tdbId: 11, en: 'Cinema',    ar: 'السينما',   icon: ICON.cinema,   sub: { en: 'Films & series',        ar: 'أفلام ومسلسلات' } },
+  { id: 'sports',   tdbId: 21, en: 'Sports',    ar: 'الرياضة',   icon: ICON.sports,   sub: { en: 'Local & global',        ar: 'محلية وعالمية' } },
+  { id: 'music',    tdbId: 12, en: 'Music',     ar: 'الموسيقى',  icon: ICON.music,    sub: { en: 'Khaleeji & pop',        ar: 'خليجية وعالمية' } },
+  { id: 'science',  tdbId: 17, en: 'Science',   ar: 'العلوم',    icon: ICON.science,  sub: { en: 'Body & world',          ar: 'الجسد والعالم' } },
+  { id: 'food',     tdbId:  9, en: 'Food',      ar: 'الطعام',    icon: ICON.food,     sub: { en: 'Recipes & origins',     ar: 'وصفات وأصول' } },
+  { id: 'language', tdbId: 10, en: 'Language',  ar: 'اللغة',     icon: ICON.language, sub: { en: 'Words, sayings',        ar: 'كلمات وأمثال' } },
+  { id: 'geo',      tdbId: 22, en: 'Geography', ar: 'الجغرافيا', icon: ICON.geo,      sub: { en: 'Places & flags',        ar: 'أماكن وأعلام' } },
+  { id: 'poetry',   tdbId: 10, en: 'Poetry',    ar: 'الشعر',     icon: ICON.poetry,   sub: { en: 'Verses & poets',        ar: 'أبيات وشعراء' } },
 ];
+
+// === Open Trivia DB integration ====================================
+// Lazy per-cell fetch with graceful fallback. Uses a session token to
+// guarantee no repeats; reset on token-exhaustion or rematch.
+let __tdbToken = null;
+let __tdbTokenPromise = null;
+async function getOpenTdbToken() {
+  if (__tdbToken) return __tdbToken;
+  if (__tdbTokenPromise) return __tdbTokenPromise;
+  __tdbTokenPromise = fetch('https://opentdb.com/api_token.php?command=request')
+    .then(r => r.json())
+    .then(d => { __tdbToken = d?.token || null; return __tdbToken; })
+    .catch(() => null)
+    .finally(() => { __tdbTokenPromise = null; });
+  return __tdbTokenPromise;
+}
+function resetOpenTdbToken() { __tdbToken = null; }
+
+function __shuffle(arr) {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+// OpenTDB returns content URL-encoded (encode=url3986). decodeURIComponent
+// handles percent-encoded UTF-8 cleanly — no need for an HTML-entity decoder.
+async function fetchOpenTdbQuestion(catId, tier) {
+  const cat = CATEGORIES.find(c => c.id === catId);
+  if (!cat?.tdbId) throw new Error('No OpenTDB mapping for ' + catId);
+  const token = await getOpenTdbToken();
+  const params = new URLSearchParams({
+    amount: '1',
+    category: String(cat.tdbId),
+    difficulty: tier,
+    encode: 'url3986',
+  });
+  if (token) params.set('token', token);
+  const res = await fetch(`https://opentdb.com/api.php?${params}`);
+  if (!res.ok) throw new Error('OpenTDB HTTP ' + res.status);
+  const data = await res.json();
+  // response_code: 0 ok, 1 no results, 2 invalid param, 3 token not found,
+  // 4 token empty (exhausted) — reset and rethrow so caller can retry.
+  if (data.response_code === 4) { resetOpenTdbToken(); throw new Error('Token exhausted'); }
+  if (data.response_code !== 0 || !data.results?.length) {
+    throw new Error('OpenTDB response_code ' + data.response_code);
+  }
+  const q = data.results[0];
+  const dec = (s) => decodeURIComponent(s);
+  const correct = dec(q.correct_answer);
+  const incorrect = q.incorrect_answers.map(dec);
+  const choices = q.type === 'multiple' ? __shuffle([...incorrect, correct]) : ['True', 'False'];
+  return {
+    source: 'opentdb',
+    type: q.type,                  // 'multiple' | 'boolean'
+    question: dec(q.question),
+    answer: correct,
+    choices,
+    category: dec(q.category),
+    difficulty: q.difficulty,
+  };
+}
 
 // Sample question content for the board — each (category, tier) cell has one Q.
 // Mix of Khaleeji-relevant + global. Real packs would be much larger.
@@ -200,4 +266,4 @@ const HISTORY_GAMES = [
   { date: 'Last month',      pack: 'Yalla Match',       winner: 'Al-Salmiya',  score: '2,800 – 2,400' },
 ];
 
-Object.assign(window, { I18N, TIERS, CATEGORIES, QUESTIONS, PACKS, DEFAULT_BOARD_CATS, HISTORY_GAMES, ICON });
+Object.assign(window, { I18N, TIERS, CATEGORIES, QUESTIONS, PACKS, DEFAULT_BOARD_CATS, HISTORY_GAMES, ICON, fetchOpenTdbQuestion, resetOpenTdbToken });

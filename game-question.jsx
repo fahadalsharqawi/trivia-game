@@ -8,7 +8,20 @@ function QuestionStage({ t, dir, lang, game, cellKey, onAward, onPass, tweaks })
   const [catId, tier] = cellKey.split('-');
   const cat = CATEGORIES.find(c => c.id === catId);
   const tierData = TIERS[tier];
-  const q = QUESTIONS[catId]?.[tier] || { q_en: 'Sample question.', q_ar: 'سؤال نموذجي.', a_en: 'Sample answer.', a_ar: 'إجابة نموذجية.' };
+  const localFallback = QUESTIONS[catId]?.[tier] || { q_en: 'Sample question.', q_ar: 'سؤال نموذجي.', a_en: 'Sample answer.', a_ar: 'إجابة نموذجية.' };
+
+  // OpenTDB fetch — one question per cell mount. Falls back to localFallback on error.
+  const [apiQ, setApiQ] = qUS(null);
+  const [apiLoading, setApiLoading] = qUS(true);
+  const [apiError, setApiError] = qUS(null);
+  qUE(() => {
+    let cancelled = false;
+    setApiQ(null); setApiError(null); setApiLoading(true);
+    fetchOpenTdbQuestion(catId, tier)
+      .then(q => { if (!cancelled) { setApiQ(q); setApiLoading(false); } })
+      .catch(err => { if (!cancelled) { setApiError(err.message || 'fetch failed'); setApiLoading(false); } });
+    return () => { cancelled = true; };
+  }, [catId, tier]);
 
   const [revealed, setRevealed] = qUS(false);
   const [time, setTime] = qUS(tweaks.timerSeconds);
@@ -17,10 +30,12 @@ function QuestionStage({ t, dir, lang, game, cellKey, onAward, onPass, tweaks })
   const [doubled, setDoubled] = qUS(false);
 
   qUE(() => {
-    if (revealed || paused || time <= 0) return;
+    // Don't tick while we're still waiting on the OpenTDB fetch — users
+    // shouldn't lose seconds to network latency.
+    if (revealed || paused || apiLoading || time <= 0) return;
     const id = setTimeout(() => setTime(t => t - 1), 1000);
     return () => clearTimeout(id);
-  }, [time, revealed, paused]);
+  }, [time, revealed, paused, apiLoading]);
 
   const pts = doubled ? tierData.pts * 2 : tierData.pts;
   const activeColor = game.activeTeam === 'A' ? tweaks.teamAColor : tweaks.teamBColor;
@@ -100,23 +115,91 @@ function QuestionStage({ t, dir, lang, game, cellKey, onAward, onPass, tweaks })
 
           {/* Question */}
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', marginTop: 24 }}>
-            <div dir={dir} style={{
-              fontFamily: 'var(--font-display)', fontWeight: 900,
-              fontSize: lang === 'ar' ? 44 : 38, lineHeight: 1.2, letterSpacing: '-0.02em',
-              textWrap: 'balance', color: 'var(--fg-1)',
-            }}>
-              {lang === 'ar' ? q.q_ar : q.q_en}
-            </div>
-            <div dir={dir === 'rtl' ? 'ltr' : 'rtl'} style={{
-              fontFamily: 'var(--font-display)', fontWeight: 500,
-              fontSize: lang === 'ar' ? 22 : 24, lineHeight: 1.4,
-              color: 'var(--fg-3)', marginTop: 18,
-            }}>
-              {lang === 'ar' ? q.q_en : q.q_ar}
-            </div>
+            {apiLoading ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                <div className="eyebrow" style={{ color: tierData.colorLight }}>
+                  {lang === 'ar' ? 'جاري تحميل السؤال…' : 'Fetching question…'}
+                </div>
+                <div style={{ height: 28, width: '70%', background: 'rgba(255,255,255,0.06)', borderRadius: 8 }} />
+                <div style={{ height: 28, width: '85%', background: 'rgba(255,255,255,0.05)', borderRadius: 8 }} />
+                <div style={{ height: 28, width: '50%', background: 'rgba(255,255,255,0.04)', borderRadius: 8 }} />
+              </div>
+            ) : apiQ ? (
+              <>
+                {/* OpenTDB question — English-only */}
+                <div dir="ltr" style={{
+                  fontFamily: 'var(--font-display)', fontWeight: 900,
+                  fontSize: 38, lineHeight: 1.2, letterSpacing: '-0.02em',
+                  textWrap: 'balance', color: 'var(--fg-1)',
+                }}>
+                  {apiQ.question}
+                </div>
+                {apiQ.choices && apiQ.choices.length > 0 && (
+                  <div style={{ marginTop: 22, display: 'grid', gridTemplateColumns: apiQ.type === 'boolean' ? '1fr 1fr' : '1fr 1fr', gap: 10 }}>
+                    {apiQ.choices.map((choice, i) => {
+                      const isAnswer = revealed && choice === apiQ.answer;
+                      const isWrong  = revealed && choice !== apiQ.answer;
+                      return (
+                        <div key={i} dir="ltr" style={{
+                          padding: '12px 16px',
+                          background: isAnswer ? `${tierData.color}26` : 'rgba(255,255,255,0.03)',
+                          border: `1px solid ${isAnswer ? tierData.color : 'var(--border-1)'}`,
+                          borderRadius: 12,
+                          display: 'flex', alignItems: 'center', gap: 12,
+                          color: isWrong ? 'var(--fg-3)' : 'var(--fg-1)',
+                          opacity: isWrong ? 0.5 : 1,
+                          transition: 'all 220ms var(--ease-out)',
+                        }}>
+                          <span style={{
+                            width: 24, height: 24, borderRadius: 6,
+                            background: isAnswer ? tierData.color : 'rgba(255,255,255,0.06)',
+                            color: isAnswer ? 'var(--midnight-950)' : 'var(--fg-2)',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            fontFamily: 'var(--font-display)', fontWeight: 900, fontSize: 12, flexShrink: 0,
+                          }}>{String.fromCharCode(65 + i)}</span>
+                          <span style={{ fontFamily: 'var(--font-display)', fontWeight: 500, fontSize: 16 }}>
+                            {choice}
+                          </span>
+                          {isAnswer && <span style={{ marginInlineStart: 'auto', fontSize: 18, color: tierData.colorLight }}>✓</span>}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+                {apiError === null && (
+                  <div style={{ marginTop: 14, fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--fg-3)', letterSpacing: '0.06em' }}>
+                    via opentdb.com · {apiQ.category}
+                  </div>
+                )}
+              </>
+            ) : (
+              <>
+                {/* Local fallback — keeps the bilingual display */}
+                <div dir={dir} style={{
+                  fontFamily: 'var(--font-display)', fontWeight: 900,
+                  fontSize: lang === 'ar' ? 44 : 38, lineHeight: 1.2, letterSpacing: '-0.02em',
+                  textWrap: 'balance', color: 'var(--fg-1)',
+                }}>
+                  {lang === 'ar' ? localFallback.q_ar : localFallback.q_en}
+                </div>
+                <div dir={dir === 'rtl' ? 'ltr' : 'rtl'} style={{
+                  fontFamily: 'var(--font-display)', fontWeight: 500,
+                  fontSize: lang === 'ar' ? 22 : 24, lineHeight: 1.4,
+                  color: 'var(--fg-3)', marginTop: 18,
+                }}>
+                  {lang === 'ar' ? localFallback.q_en : localFallback.q_ar}
+                </div>
+                {apiError && (
+                  <div style={{ marginTop: 14, fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--fg-3)' }}>
+                    {lang === 'ar' ? 'تعذّر الاتصال بـ OpenTDB · سؤال احتياطي' : `OpenTDB unavailable (${apiError}) · using fallback`}
+                  </div>
+                )}
+              </>
+            )}
 
-            {/* Answer reveal */}
-            {revealed && (
+            {/* Answer reveal — only shown for the local fallback path; for
+                OpenTDB the answer is highlighted inline in the choices grid */}
+            {revealed && !apiQ && (
               <div className="wipe-reveal" style={{
                 marginTop: 32, padding: '20px 24px',
                 background: `${tierData.color}1a`,
@@ -126,10 +209,10 @@ function QuestionStage({ t, dir, lang, game, cellKey, onAward, onPass, tweaks })
                 <div className="eyebrow" style={{ color: tierData.colorLight }}>{t.answer}</div>
                 <div style={{ display: 'flex', alignItems: 'baseline', gap: 16, marginTop: 8, flexWrap: 'wrap' }}>
                   <div style={{ fontFamily: 'var(--font-display)', fontWeight: 900, fontSize: 32, color: 'var(--fg-1)', letterSpacing: '-0.01em' }}>
-                    {lang === 'ar' ? q.a_ar : q.a_en}
+                    {lang === 'ar' ? localFallback.a_ar : localFallback.a_en}
                   </div>
                   <div style={{ fontFamily: 'var(--font-display)', fontWeight: 500, fontSize: 18, color: 'var(--fg-3)' }}>
-                    {lang === 'ar' ? q.a_en : q.a_ar}
+                    {lang === 'ar' ? localFallback.a_en : localFallback.a_ar}
                   </div>
                 </div>
               </div>
@@ -140,8 +223,8 @@ function QuestionStage({ t, dir, lang, game, cellKey, onAward, onPass, tweaks })
           <div style={{ marginTop: 32, display: 'flex', gap: 10, alignItems: 'center' }}>
             {!revealed ? (
               <>
-                <button className="btn-primary" onClick={() => setRevealed(true)} style={{ flex: 1 }}>
-                  {t.reveal}
+                <button className="btn-primary" onClick={() => setRevealed(true)} style={{ flex: 1 }} disabled={apiLoading}>
+                  {apiLoading ? (lang === 'ar' ? 'جاري التحميل…' : 'Loading…') : t.reveal}
                 </button>
                 <button className="btn-ghost" onClick={() => onPass(cellKey, 'pass')}>{t.pass}</button>
               </>
